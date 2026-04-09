@@ -463,6 +463,12 @@ def build_summary_table(counts, percentages):
         }
     )
 
+def make_text_bar(label, value, total_blocks=10):
+    filled = round((value / 100) * total_blocks)
+    empty = total_blocks - filled
+    bar = "█" * filled + "░" * empty
+    return f"{label:<8} {bar} {value:.0f}%"
+
 def create_pdf_report(image_name, original_rgb, result_rgb, pie_fig, counts, percentages, recommendations, region_boxes):
     pdf_buffer = io.BytesIO()
     generated_on = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
@@ -475,6 +481,12 @@ def create_pdf_report(image_name, original_rgb, result_rgb, pie_fig, counts, per
         "- The CNN classifies each patch as Low Yield, Medium Yield, or High Yield.\n"
         "- Connected neighboring patches predicted as Low Yield are grouped and outlined as stress zones."
     )
+
+    bars_text = "\n".join([
+        make_text_bar("High", percentages[2]),
+        make_text_bar("Medium", percentages[1]),
+        make_text_bar("Low", percentages[0]),
+    ])
 
     with PdfPages(pdf_buffer) as pdf:
         fig1, axes = plt.subplots(1, 2, figsize=(14, 7))
@@ -507,25 +519,31 @@ def create_pdf_report(image_name, original_rgb, result_rgb, pie_fig, counts, per
         ax2.text(0.05, 0.73, "Summary Table", fontsize=14, fontweight="bold")
         ax2.text(0.05, 0.70, summary_table.to_string(index=False), family="monospace", fontsize=11, va="top")
 
-        ax2.text(0.05, 0.47, "Zone Marking Basis", fontsize=14, fontweight="bold")
-        ax2.text(0.05, 0.44, zone_basis_text, fontsize=11, va="top")
+        ax2.text(0.05, 0.49, "Yield Intensity Bars", fontsize=14, fontweight="bold")
+        ax2.text(0.05, 0.46, bars_text, family="monospace", fontsize=12, va="top")
 
-        recommendation_text = "\n".join([f"- {item}" for item in recommendations])
-        ax2.text(0.05, 0.22, "Recommendations", fontsize=14, fontweight="bold")
-        ax2.text(0.05, 0.19, recommendation_text, fontsize=11, va="top")
+        ax2.text(0.05, 0.31, "Zone Marking Basis", fontsize=14, fontweight="bold")
+        ax2.text(0.05, 0.28, zone_basis_text, fontsize=11, va="top")
         pdf.savefig(fig2, bbox_inches="tight")
         plt.close(fig2)
 
+        fig3, ax3 = plt.subplots(figsize=(11, 8.5))
+        ax3.axis("off")
+        recommendation_text = "\n".join([f"- {item}" for item in recommendations])
+        ax3.text(0.05, 0.95, "Recommendations", fontsize=18, fontweight="bold", va="top")
+        ax3.text(0.05, 0.88, recommendation_text, fontsize=12, va="top")
+
         if region_boxes:
-            fig3, ax3 = plt.subplots(figsize=(11, 8.5))
-            ax3.axis("off")
             region_text = "\n".join(
                 [f"- {box['label']}: {box['cells']} connected low-yield patches" for box in region_boxes]
             )
-            ax3.text(0.05, 0.95, "Detected Stress Regions", fontsize=18, fontweight="bold", va="top")
-            ax3.text(0.05, 0.87, region_text, fontsize=12, va="top")
-            pdf.savefig(fig3, bbox_inches="tight")
-            plt.close(fig3)
+        else:
+            region_text = "- No major connected low-yield zone detected."
+
+        ax3.text(0.05, 0.55, "Detected Stress Zones", fontsize=16, fontweight="bold")
+        ax3.text(0.05, 0.49, region_text, fontsize=12, va="top")
+        pdf.savefig(fig3, bbox_inches="tight")
+        plt.close(fig3)
 
         pdf.savefig(pie_fig, bbox_inches="tight")
 
@@ -667,7 +685,7 @@ if uploaded_files and analyze:
 with center_col:
     st.markdown('<div class="panel">', unsafe_allow_html=True)
     st.markdown('<div class="panel-title">Crop Health Analysis</div>', unsafe_allow_html=True)
-    st.markdown('<div class="soft-text">Before/after comparison, PDF reporting, and connected low-yield zone highlighting.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="soft-text">Before/after comparison, PDF reporting, stress-zone highlighting, and intensity bars.</div>', unsafe_allow_html=True)
 
     if not uploaded_files:
         st.info("Upload one or more images and click Analyze Crop Health.")
@@ -688,6 +706,12 @@ with center_col:
 
                 low, medium, high = result["percentages"]
 
+                bar_text = "\n".join([
+                    make_text_bar("High", high),
+                    make_text_bar("Medium", medium),
+                    make_text_bar("Low", low),
+                ])
+
                 st.markdown(
                     f"""
                     <div class="caption-bar">
@@ -699,6 +723,9 @@ with center_col:
                     unsafe_allow_html=True,
                 )
 
+                st.markdown("**Yield Intensity Bars**")
+                st.code(bar_text)
+
                 metric1, metric2, metric3, metric4 = st.columns(4)
                 metric1.metric("Low Yield", f"{low:.2f}%")
                 metric2.metric("Medium Yield", f"{medium:.2f}%")
@@ -706,18 +733,10 @@ with center_col:
                 metric4.metric("Total Patches", f"{result['total']}")
 
                 st.markdown("**Zone Marking Basis**")
-                st.write(
-                    f"- The image is split into {PATCH_SIZE} x {PATCH_SIZE} pixel patches."
-                )
-                st.write(
-                    f"- Each patch is resized to {MODEL_INPUT_SIZE[0]} x {MODEL_INPUT_SIZE[1]} pixels before CNN prediction."
-                )
-                st.write(
-                    "- The CNN predicts whether each patch is Low Yield, Medium Yield, or High Yield."
-                )
-                st.write(
-                    "- Neighboring patches predicted as Low Yield are grouped and marked as stress zones."
-                )
+                st.write(f"- The image is split into {PATCH_SIZE} x {PATCH_SIZE} pixel patches.")
+                st.write(f"- Each patch is resized to {MODEL_INPUT_SIZE[0]} x {MODEL_INPUT_SIZE[1]} pixels before CNN prediction.")
+                st.write("- The CNN predicts whether each patch is Low Yield, Medium Yield, or High Yield.")
+                st.write("- Neighboring patches predicted as Low Yield are grouped and marked as stress zones.")
 
                 chart_col, table_col = st.columns([1.2, 1.0])
 
