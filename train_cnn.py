@@ -1,3 +1,4 @@
+import base64
 import io
 import os
 import tempfile
@@ -15,6 +16,8 @@ from tensorflow.keras.models import load_model
 MODEL_PATH = "cnn_model.h5"
 LOGO_PATH = "crop_sense.png"
 PATCH_SIZE = 32
+MODEL_INPUT_SIZE = (64, 64)
+MAX_DISPLAY_WIDTH = 1200
 
 st.set_page_config(
     page_title="CropSense",
@@ -31,13 +34,11 @@ st.markdown("""
         background: radial-gradient(circle at top left, #1d1f25 0%, #111217 45%, #0b0c10 100%);
         color: #f5f5f5;
     }
-
     .block-container {
         max-width: 1280px;
         padding-top: 1.5rem;
         padding-bottom: 1.5rem;
     }
-
     .main-shell {
         background: rgba(20, 21, 27, 0.88);
         border: 1px solid rgba(255,255,255,0.07);
@@ -46,7 +47,6 @@ st.markdown("""
         box-shadow: 0 20px 70px rgba(0,0,0,0.45);
         backdrop-filter: blur(10px);
     }
-
     .topbar {
         display: flex;
         justify-content: space-between;
@@ -55,26 +55,22 @@ st.markdown("""
         border-bottom: 1px solid rgba(255,255,255,0.06);
         background: linear-gradient(90deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
     }
-
     .brand-wrap {
         display: flex;
         align-items: center;
         gap: 16px;
     }
-
     .brand-title {
         font-size: 2rem;
         font-weight: 800;
         line-height: 1;
         margin: 0;
     }
-
     .brand-sub {
         margin: 6px 0 0 0;
         color: #b8bbc7;
         font-size: 1rem;
     }
-
     .status-pill {
         padding: 10px 18px;
         border-radius: 999px;
@@ -84,7 +80,6 @@ st.markdown("""
         font-weight: 600;
         font-size: 0.98rem;
     }
-
     .status-dot {
         display: inline-block;
         width: 10px;
@@ -94,11 +89,9 @@ st.markdown("""
         margin-right: 10px;
         box-shadow: 0 0 12px rgba(87,210,108,0.7);
     }
-
     .content-pad {
         padding: 20px;
     }
-
     .panel {
         background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02));
         border: 1px solid rgba(255,255,255,0.06);
@@ -106,18 +99,15 @@ st.markdown("""
         padding: 18px;
         box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
     }
-
     .panel-title {
         font-size: 1.45rem;
         font-weight: 700;
         margin-bottom: 0.2rem;
     }
-
     .soft-text {
         color: #aeb3bf;
         font-size: 0.97rem;
     }
-
     .legend-row {
         display: flex;
         align-items: center;
@@ -125,33 +115,12 @@ st.markdown("""
         margin: 10px 0;
         font-size: 1rem;
     }
-
     .legend-box {
         width: 14px;
         height: 14px;
         border-radius: 4px;
         display: inline-block;
     }
-
-    .metric-card {
-        background: rgba(255,255,255,0.04);
-        border: 1px solid rgba(255,255,255,0.06);
-        border-radius: 18px;
-        padding: 16px;
-        text-align: center;
-    }
-
-    .metric-label {
-        color: #aeb3bf;
-        font-size: 0.95rem;
-        margin-bottom: 6px;
-    }
-
-    .metric-value {
-        font-size: 1.8rem;
-        font-weight: 800;
-    }
-
     .summary-card {
         background: rgba(255,255,255,0.03);
         border: 1px solid rgba(255,255,255,0.06);
@@ -159,13 +128,11 @@ st.markdown("""
         padding: 18px;
         margin-bottom: 16px;
     }
-
     .summary-title {
         font-size: 1.2rem;
         font-weight: 700;
         margin-bottom: 10px;
     }
-
     .summary-row {
         display: flex;
         justify-content: space-between;
@@ -174,17 +141,14 @@ st.markdown("""
         border-bottom: 1px solid rgba(255,255,255,0.05);
         font-size: 1rem;
     }
-
     .summary-row:last-child {
         border-bottom: none;
     }
-
     .chip {
         display: inline-flex;
         align-items: center;
         gap: 8px;
     }
-
     .caption-bar {
         background: rgba(255,255,255,0.03);
         border: 1px solid rgba(255,255,255,0.05);
@@ -194,13 +158,6 @@ st.markdown("""
         font-weight: 600;
         font-size: 1.05rem;
     }
-
-    .footer-note {
-        color: #97a0ad;
-        font-size: 0.95rem;
-        margin-top: 10px;
-    }
-
     .stButton>button, .stDownloadButton>button {
         width: 100%;
         border-radius: 14px;
@@ -211,21 +168,12 @@ st.markdown("""
         padding: 0.8rem 1rem;
         box-shadow: 0 10px 25px rgba(80, 190, 100, 0.25);
     }
-
     .stFileUploader {
         background: rgba(255,255,255,0.025);
         border-radius: 14px;
         padding: 8px;
         border: 1px solid rgba(255,255,255,0.05);
     }
-
-    div[data-testid="stMetric"] {
-        background: rgba(255,255,255,0.03);
-        border: 1px solid rgba(255,255,255,0.06);
-        padding: 16px;
-        border-radius: 16px;
-    }
-
     .stAlert {
         border-radius: 14px;
     }
@@ -252,35 +200,61 @@ except Exception as e:
 # ==============================
 # HELPERS
 # ==============================
+def get_logo_html():
+    if os.path.exists(LOGO_PATH):
+        with open(LOGO_PATH, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode()
+        return f'<img src="data:image/png;base64,{encoded}" width="180">'
+    return '<div style="font-size:2rem;font-weight:800;"><span style="color:#4caf50;">Crop</span><span style="color:#f59e0b;">Sense</span></div>'
+
 def get_color(pred):
     if pred == 0:
-        return (0, 0, 255)      # red
+        return (0, 0, 255)
     if pred == 1:
-        return (0, 255, 255)    # yellow
-    return (0, 255, 0)          # green
+        return (0, 255, 255)
+    return (0, 255, 0)
+
+def resize_for_display(img, max_width=MAX_DISPLAY_WIDTH):
+    h, w = img.shape[:2]
+    if w <= max_width:
+        return img
+    scale = max_width / w
+    new_size = (int(w * scale), int(h * scale))
+    return cv2.resize(img, new_size, interpolation=cv2.INTER_AREA)
 
 def analyze_with_cnn(img, patch_size, model):
     h, w, _ = img.shape
     output_img = img.copy()
     counts = [0, 0, 0]
 
+    patches = []
+    positions = []
+
     for y in range(0, h, patch_size):
         for x in range(0, w, patch_size):
             patch = img[y:y + patch_size, x:x + patch_size]
 
             if patch.shape[0] == patch_size and patch.shape[1] == patch_size:
-                patch_input = cv2.resize(patch, (64, 64))
+                patch_input = cv2.resize(patch, MODEL_INPUT_SIZE)
                 patch_input = patch_input.astype("float32") / 255.0
-                patch_input = np.expand_dims(patch_input, axis=0)
+                patches.append(patch_input)
+                positions.append((x, y))
 
-                pred = int(np.argmax(model.predict(patch_input, verbose=0), axis=1)[0])
-                counts[pred] += 1
+    if not patches:
+        return output_img, counts
 
-                color = get_color(pred)
-                overlay = output_img.copy()
-                cv2.rectangle(overlay, (x, y), (x + patch_size, y + patch_size), color, -1)
-                cv2.addWeighted(overlay, 0.28, output_img, 0.72, 0, output_img)
+    patch_batch = np.array(patches, dtype=np.float32)
+    predictions = model.predict(patch_batch, verbose=0)
+    pred_classes = np.argmax(predictions, axis=1)
 
+    overlay = output_img.copy()
+
+    for (x, y), pred in zip(positions, pred_classes):
+        counts[int(pred)] += 1
+        color = get_color(int(pred))
+        cv2.rectangle(overlay, (x, y), (x + patch_size, y + patch_size), color, -1)
+
+    cv2.addWeighted(overlay, 0.28, output_img, 0.72, 0, output_img)
     return output_img, counts
 
 def build_pie_chart(low, medium, high):
@@ -289,7 +263,8 @@ def build_pie_chart(low, medium, high):
     labels = ["Low Yield", "Medium Yield", "High Yield"]
     sizes = [low, medium, high]
     colors = ["#ff5a5a", "#ffca3a", "#58d26a"]
-    wedges, texts, autotexts = ax.pie(
+
+    _, texts, autotexts = ax.pie(
         sizes,
         labels=labels,
         colors=colors,
@@ -297,15 +272,21 @@ def build_pie_chart(low, medium, high):
         startangle=90,
         textprops={"color": "white", "fontsize": 11}
     )
-    for t in autotexts:
-        t.set_color("white")
-        t.set_fontweight("bold")
+
+    for text in autotexts:
+        text.set_color("white")
+        text.set_fontweight("bold")
+
+    for text in texts:
+        text.set_color("white")
+
     ax.axis("equal")
     ax.set_title("Yield Distribution", color="white", fontsize=15, pad=16)
     return fig
 
 def create_pdf_report(uploaded_name, output_rgb, pie_fig, counts, percentages):
     pdf_buffer = io.BytesIO()
+
     with PdfPages(pdf_buffer) as pdf:
         fig1, ax1 = plt.subplots(figsize=(11, 8.5))
         ax1.imshow(output_rgb)
@@ -337,17 +318,11 @@ def create_pdf_report(uploaded_name, output_rgb, pie_fig, counts, percentages):
 # ==============================
 # HEADER
 # ==============================
-logo_html = ""
-if os.path.exists(LOGO_PATH):
-    logo_html = f'<img src="data:image/png;base64,{__import__("base64").b64encode(open(LOGO_PATH, "rb").read()).decode()}" width="180">'
-else:
-    logo_html = '<div style="font-size:2rem;font-weight:800;"><span style="color:#4caf50;">Crop</span><span style="color:#f59e0b;">Sense</span></div>'
-
 st.markdown(f"""
 <div class="main-shell">
     <div class="topbar">
         <div class="brand-wrap">
-            <div>{logo_html}</div>
+            <div>{get_logo_html()}</div>
             <div>
                 <div class="brand-title">AI-Powered <span style="color:#d9d9d9;font-weight:500;">Crop Health Intelligence</span></div>
                 <div class="brand-sub">CNN-based smart crop analysis</div>
@@ -367,8 +342,14 @@ with left_col:
     st.markdown('<div class="panel">', unsafe_allow_html=True)
     st.markdown('<div class="panel-title">Upload Farm Image</div>', unsafe_allow_html=True)
     st.markdown('<div class="soft-text">Upload an aerial farm image for CNN analysis.</div>', unsafe_allow_html=True)
-    uploaded_file = st.file_uploader("Upload", type=["png", "jpg", "jpeg"], label_visibility="collapsed")
+
+    uploaded_file = st.file_uploader(
+        "Upload Farm Image",
+        type=["png", "jpg", "jpeg"],
+        label_visibility="collapsed"
+    )
     analyze = st.button("Analyze Crop Health")
+
     st.markdown("<hr style='border-color: rgba(255,255,255,0.06);'>", unsafe_allow_html=True)
     st.markdown('<div class="panel-title" style="font-size:1.2rem;">Legend</div>', unsafe_allow_html=True)
     st.markdown('<div class="legend-row"><span class="legend-box" style="background:#ff5a5a;"></span> Low Yield</div>', unsafe_allow_html=True)
@@ -376,35 +357,39 @@ with left_col:
     st.markdown('<div class="legend-row"><span class="legend-box" style="background:#58d26a;"></span> High Yield</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
+output_rgb = None
+pie_fig = None
+pdf_buffer = None
+counts = [0, 0, 0]
+low = medium = high = 0.0
+total = 0
 
 with center_col:
     st.markdown('<div class="panel">', unsafe_allow_html=True)
     st.markdown('<div class="panel-title">Analyzing crop health...</div>', unsafe_allow_html=True)
-    st.markdown('<div class="soft-text">Patch-wise CNN yield segmentation with fixed analysis scale.</div>', unsafe_allow_html=True)
-
-    output_rgb = None
-    pie_fig = None
-    pdf_buffer = None
-    counts = [0, 0, 0]
-    low = medium = high = 0.0
-    total = 0
+    st.markdown('<div class="soft-text">Optimized batch prediction with fixed patch size.</div>', unsafe_allow_html=True)
 
     if uploaded_file is not None and analyze:
         temp_path = None
         try:
             suffix = os.path.splitext(uploaded_file.name)[1] or ".png"
+
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 tmp.write(uploaded_file.read())
                 temp_path = tmp.name
 
             img = cv2.imread(temp_path)
+
             if img is None:
                 st.error("Unable to read image.")
             else:
+                display_img = resize_for_display(img)
+
                 with st.spinner("Running CNN analysis..."):
-                    output_img, counts = analyze_with_cnn(img, PATCH_SIZE, model)
+                    output_img, counts = analyze_with_cnn(display_img, PATCH_SIZE, model)
 
                 total = sum(counts)
+
                 if total == 0:
                     st.warning("No valid patches found.")
                 else:
@@ -435,7 +420,6 @@ with center_col:
                         """,
                         unsafe_allow_html=True
                     )
-
         except Exception as e:
             st.error(f"Error: {e}")
         finally:
@@ -463,7 +447,7 @@ with right_col:
     st.markdown('<div class="summary-card">', unsafe_allow_html=True)
     st.markdown('<div class="summary-title">Result Summary</div>', unsafe_allow_html=True)
     st.markdown(
-        f'''
+        f"""
         <div class="summary-row">
             <span class="chip"><span class="legend-box" style="background:#58d26a;"></span> High Yield</span>
             <span>{high:.1f}%</span>
@@ -476,7 +460,7 @@ with right_col:
             <span class="chip"><span class="legend-box" style="background:#ff5a5a;"></span> Low Yield</span>
             <span>{low:.1f}%</span>
         </div>
-        ''',
+        """,
         unsafe_allow_html=True
     )
     st.markdown('</div>', unsafe_allow_html=True)
@@ -486,7 +470,7 @@ with right_col:
     if total > 0:
         dominant = max(
             [("Low Yield", low), ("Medium Yield", medium), ("High Yield", high)],
-            key=lambda x: x[1]
+            key=lambda item: item[1]
         )[0]
         st.markdown(f"- Dominant class: **{dominant}**")
         st.markdown(f"- Total patches analyzed: **{total}**")
