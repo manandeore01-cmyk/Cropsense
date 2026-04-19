@@ -60,7 +60,7 @@ st.markdown("""
         color: #f5f5f5;
     }
     .block-container {
-        max-width: 1350px;
+        max-width: 1380px;
         padding-top: 1.5rem;
         padding-bottom: 1.5rem;
     }
@@ -216,6 +216,30 @@ st.markdown("""
         background: rgba(255,255,255,0.04);
         border-radius: 12px;
         padding: 10px 14px;
+    }
+    .rec-card {
+        border-radius: 18px;
+        padding: 16px;
+        border: 1px solid rgba(255,255,255,0.08);
+        background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02));
+        height: 100%;
+    }
+    .rec-title {
+        font-size: 1.05rem;
+        font-weight: 800;
+        margin-bottom: 10px;
+    }
+    .rec-basis {
+        color: #b8bbc7;
+        font-size: 0.92rem;
+        margin-bottom: 10px;
+    }
+    .rec-list {
+        margin: 0;
+        padding-left: 18px;
+    }
+    .rec-list li {
+        margin-bottom: 6px;
     }
     .stAlert {
         border-radius: 14px;
@@ -400,6 +424,98 @@ def detect_location(region_box, img_shape):
         return f"{vertical}-center area"
     return f"{vertical}-{horizontal} area"
 
+def classify_intensity(value):
+    if value >= 55:
+        return "High"
+    if value >= 25:
+        return "Moderate"
+    return "Low"
+
+def build_zone_recommendations(percentages, region_boxes, img_shape):
+    low, medium, high = percentages
+    region_count = len(region_boxes)
+    largest_region_cells = max([box["cells"] for box in region_boxes], default=0)
+    major_region_location = detect_location(max(region_boxes, key=lambda box: box["cells"]), img_shape) if region_boxes else "none"
+
+    low_basis = [
+        f"Low-yield share detected: {low:.1f}%",
+        f"Connected low-yield zones found: {region_count}",
+        f"Largest connected low-yield cluster size: {largest_region_cells} patches",
+    ]
+    if region_boxes:
+        low_basis.append(f"Most intense low-yield concentration location: {major_region_location}")
+
+    low_actions = []
+    if low >= 40:
+        low_actions.extend([
+            "Inspect highlighted low-yield zones immediately for irrigation gaps, drainage issues, pest pressure, or nutrient deficiency.",
+            "Run a targeted soil and leaf test in the largest stress zone before applying corrective fertilizers.",
+            "Prioritize localized intervention such as fertigation, micronutrient correction, and disease scouting in outlined regions.",
+        ])
+    elif low >= 20:
+        low_actions.extend([
+            "Monitor outlined low-yield regions closely and verify whether stress is linked to uneven water distribution or nutrient imbalance.",
+            "Apply corrective inputs only in affected blocks to avoid unnecessary cost across healthy sections.",
+            "Schedule a field visit in the marked zones within the next crop management cycle.",
+        ])
+    else:
+        low_actions.extend([
+            "Only small low-yield pockets are present; continue monitoring these areas for early stress escalation.",
+            "Use the highlighted patches as inspection targets during routine scouting.",
+        ])
+
+    medium_basis = [
+        f"Medium-yield share detected: {medium:.1f}%",
+        f"Stress transition level: {classify_intensity(medium)}",
+    ]
+    medium_actions = []
+    if medium >= 35:
+        medium_actions.extend([
+            "This image shows a large moderate-yield band; optimize irrigation timing and balanced fertilizer application to shift these zones toward high yield.",
+            "Check canopy uniformity and pest incidence in medium-yield areas before the next management cycle.",
+            "Use variable-rate nutrient application where medium-yield zones surround low-yield clusters.",
+        ])
+    else:
+        medium_actions.extend([
+            "Medium-yield zones are limited; maintain regular irrigation and nutrition monitoring to prevent regression into low yield.",
+            "Track these areas over time to confirm whether they are improving or declining.",
+        ])
+
+    high_basis = [
+        f"High-yield share detected: {high:.1f}%",
+        f"Overall healthy coverage level: {classify_intensity(high)}",
+    ]
+    high_actions = []
+    if high >= 50:
+        high_actions.extend([
+            "Healthy crop coverage is strong; maintain current irrigation, nutrient, and crop protection practices in these zones.",
+            "Protect high-performing areas from over-irrigation and unnecessary chemical intervention.",
+            "Use these zones as a benchmark when comparing stressed parts of the field.",
+        ])
+    else:
+        high_actions.extend([
+            "High-yield zones exist but are not dominant; strengthen management in medium zones to expand healthy coverage.",
+            "Preserve healthy sections while focusing interventions on low and medium-yield zones.",
+        ])
+
+    return {
+        "Low Yield": {
+            "color": CLASS_COLORS_HEX[LOW_CLASS],
+            "basis": low_basis,
+            "actions": low_actions,
+        },
+        "Medium Yield": {
+            "color": CLASS_COLORS_HEX[MEDIUM_CLASS],
+            "basis": medium_basis,
+            "actions": medium_actions,
+        },
+        "High Yield": {
+            "color": CLASS_COLORS_HEX[HIGH_CLASS],
+            "basis": high_basis,
+            "actions": high_actions,
+        },
+    }
+
 def generate_recommendations(percentages, region_boxes, img_shape):
     low, medium, high = percentages
     recommendations = []
@@ -469,7 +585,40 @@ def make_text_bar(label, value, total_blocks=10):
     bar = "█" * filled + "░" * empty
     return f"{label:<8} {bar} {value:.0f}%"
 
-def create_pdf_report(image_name, original_rgb, result_rgb, pie_fig, counts, percentages, recommendations, region_boxes):
+def render_zone_recommendation_cards(zone_recommendations):
+    cols = st.columns(3)
+    zone_order = ["Low Yield", "Medium Yield", "High Yield"]
+
+    for col, zone_name in zip(cols, zone_order):
+        zone_data = zone_recommendations[zone_name]
+        basis_html = "".join([f"<li>{item}</li>" for item in zone_data["basis"]])
+        action_html = "".join([f"<li>{item}</li>" for item in zone_data["actions"]])
+
+        with col:
+            st.markdown(
+                f"""
+                <div class="rec-card">
+                    <div class="rec-title" style="color:{zone_data['color']};">{zone_name} Recommendation Module</div>
+                    <div class="rec-basis"><b>Basis</b></div>
+                    <ul class="rec-list">{basis_html}</ul>
+                    <div class="rec-basis" style="margin-top:12px;"><b>Recommended Actions</b></div>
+                    <ul class="rec-list">{action_html}</ul>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+def create_pdf_report(
+    image_name,
+    original_rgb,
+    result_rgb,
+    pie_fig,
+    counts,
+    percentages,
+    recommendations,
+    region_boxes,
+    zone_recommendations,
+):
     pdf_buffer = io.BytesIO()
     generated_on = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
     summary_table = build_summary_table(counts, percentages)
@@ -530,7 +679,7 @@ def create_pdf_report(image_name, original_rgb, result_rgb, pie_fig, counts, per
         fig3, ax3 = plt.subplots(figsize=(11, 8.5))
         ax3.axis("off")
         recommendation_text = "\n".join([f"- {item}" for item in recommendations])
-        ax3.text(0.05, 0.95, "Recommendations", fontsize=18, fontweight="bold", va="top")
+        ax3.text(0.05, 0.95, "Overall Insights", fontsize=18, fontweight="bold", va="top")
         ax3.text(0.05, 0.88, recommendation_text, fontsize=12, va="top")
 
         if region_boxes:
@@ -544,6 +693,27 @@ def create_pdf_report(image_name, original_rgb, result_rgb, pie_fig, counts, per
         ax3.text(0.05, 0.49, region_text, fontsize=12, va="top")
         pdf.savefig(fig3, bbox_inches="tight")
         plt.close(fig3)
+
+        fig4, ax4 = plt.subplots(figsize=(11, 8.5))
+        ax4.axis("off")
+        ax4.text(0.05, 0.96, "Intelligent Recommendation Module", fontsize=18, fontweight="bold", va="top")
+
+        current_y = 0.88
+        for zone_name in ["Low Yield", "Medium Yield", "High Yield"]:
+            zone_data = zone_recommendations[zone_name]
+            ax4.text(0.05, current_y, zone_name, fontsize=14, fontweight="bold")
+            current_y -= 0.04
+            ax4.text(0.07, current_y, "Basis:", fontsize=11, fontweight="bold")
+            current_y -= 0.03
+            ax4.text(0.09, current_y, "\n".join([f"- {item}" for item in zone_data["basis"]]), fontsize=10, va="top")
+            current_y -= 0.12
+            ax4.text(0.07, current_y, "Recommended Actions:", fontsize=11, fontweight="bold")
+            current_y -= 0.03
+            ax4.text(0.09, current_y, "\n".join([f"- {item}" for item in zone_data["actions"]]), fontsize=10, va="top")
+            current_y -= 0.16
+
+        pdf.savefig(fig4, bbox_inches="tight")
+        plt.close(fig4)
 
         pdf.savefig(pie_fig, bbox_inches="tight")
 
@@ -584,6 +754,8 @@ def process_single_image(uploaded_file, model):
         result_rgb = cv2.cvtColor(highlighted_output, cv2.COLOR_BGR2RGB)
         pie_fig = build_pie_chart(*percentages)
         recommendations = generate_recommendations(percentages, region_boxes, display_img.shape)
+        zone_recommendations = build_zone_recommendations(percentages, region_boxes, display_img.shape)
+
         pdf_buffer = create_pdf_report(
             uploaded_file.name,
             original_rgb,
@@ -593,6 +765,7 @@ def process_single_image(uploaded_file, model):
             percentages,
             recommendations,
             region_boxes,
+            zone_recommendations,
         )
 
         return {
@@ -603,6 +776,7 @@ def process_single_image(uploaded_file, model):
             "percentages": percentages,
             "pie_fig": pie_fig,
             "recommendations": recommendations,
+            "zone_recommendations": zone_recommendations,
             "region_boxes": region_boxes,
             "pdf_buffer": pdf_buffer,
             "summary_table": build_summary_table(counts, percentages),
@@ -624,7 +798,7 @@ st.markdown(
             <div>{get_logo_html()}</div>
             <div>
                 <div class="brand-title">AI-Powered <span style="color:#d9d9d9;font-weight:500;">Crop Health Intelligence</span></div>
-                <div class="brand-sub">CNN-based smart crop analysis with reporting and stress-zone highlighting</div>
+                <div class="brand-sub">CNN-based smart crop analysis with intelligent decision support</div>
             </div>
         </div>
         <div class="status-pill"><span class="status-dot"></span>Status: Ready</div>
@@ -649,8 +823,9 @@ with left_col:
         type=["png", "jpg", "jpeg"],
         accept_multiple_files=True,
         label_visibility="collapsed",
+        key="farm_image_uploader",
     )
-    analyze = st.button("Analyze Crop Health")
+    analyze = st.button("Analyze Crop Health", key="analyze_crop_health")
 
     st.markdown('<div class="subtle-divider"></div>', unsafe_allow_html=True)
     st.markdown('<div class="panel-title" style="font-size:1.2rem;">Legend</div>', unsafe_allow_html=True)
@@ -685,14 +860,14 @@ if uploaded_files and analyze:
 with center_col:
     st.markdown('<div class="panel">', unsafe_allow_html=True)
     st.markdown('<div class="panel-title">Crop Health Analysis</div>', unsafe_allow_html=True)
-    st.markdown('<div class="soft-text">Before/after comparison, PDF reporting, stress-zone highlighting, and intensity bars.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="soft-text">Before/after comparison, intelligent remedies, PDF reporting, and stress-zone highlighting.</div>', unsafe_allow_html=True)
 
     if not uploaded_files:
         st.info("Upload one or more images and click Analyze Crop Health.")
     elif analyze and results:
         tabs = st.tabs([result["name"] for result in results])
 
-        for tab, result in zip(tabs, results):
+        for tab_index, (tab, result) in enumerate(zip(tabs, results)):
             with tab:
                 before_col, after_col = st.columns(2)
 
@@ -747,6 +922,13 @@ with center_col:
                     st.markdown("**Summary Table**")
                     st.dataframe(result["summary_table"], use_container_width=True, hide_index=True)
 
+                st.markdown("**Intelligent Recommendation Module**")
+                render_zone_recommendation_cards(result["zone_recommendations"])
+
+                st.markdown("**Overall Context-Aware Insights**")
+                for recommendation in result["recommendations"]:
+                    st.write(f"- {recommendation}")
+
                 if result["region_boxes"]:
                     st.markdown("**Detected Stress Zones**")
                     for box in result["region_boxes"]:
@@ -759,6 +941,7 @@ with center_col:
                     data=result["pdf_buffer"],
                     file_name=f"{os.path.splitext(result['name'])[0]}_CropSense_Report.pdf",
                     mime="application/pdf",
+                    key=f"download_pdf_{tab_index}_{result['name']}",
                 )
     elif analyze:
         st.warning("No results were generated. Please check the uploaded images.")
@@ -808,6 +991,7 @@ with right_col:
             "Select image for insights",
             options=[item["name"] for item in results],
             label_visibility="collapsed",
+            key="field_insight_selector",
         )
         selected_result = next(item for item in results if item["name"] == selected)
         for recommendation in selected_result["recommendations"]:
@@ -821,4 +1005,3 @@ st.markdown("""
     </div>
 </div>
 """, unsafe_allow_html=True)
-
